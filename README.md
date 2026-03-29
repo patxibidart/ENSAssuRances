@@ -50,12 +50,9 @@ ENSAssuRances/
 │   └── ENSAssuRances_Patxi_Bidart.R
 │
 ├── 📂 report/                      # Rapport RMarkdown
-│   └── ENSAssuRances_Patxi_Bidart.Rmd
-│
-├── 📂 output/                      # Graphiques et exports
+│   └── ENSAssuRances_Patxi_Bidart.Rmd                     
 │
 ├── .gitignore
-├── LICENSE
 └── README.md
 ```
 
@@ -69,10 +66,8 @@ Les fichiers de données ne sont pas inclus dans ce dépôt en raison de leur ta
 
 | Fichier | Description | Lien |
 |---|---|---|
-| `Contrat.xlsx` | 301 437 contrats d'assurance automobile | [Kaggle 🔗](https://www.kaggle.com/datasets/TON_USERNAME/ensassurances) |
-| `Sinistre.xlsx` | 72 130 sinistres déclarés | [Kaggle 🔗](https://www.kaggle.com/datasets/TON_USERNAME/ensassurances) |
-
-> Une fois téléchargés, placez les fichiers dans le dossier `data/` avant d'exécuter les scripts.
+| `Contrat.xlsx` | 301 437 contrats d'assurance automobile | [Kaggle 🔗](https://www.kaggle.com/datasets/patxibidart/ensassurances-sinistres-et-contrats-automobiles?select=Sinistre.xlsx) |
+| `Sinistre.xlsx` | 72 130 sinistres déclarés | [Kaggle 🔗](https://www.kaggle.com/datasets/patxibidart/ensassurances-sinistres-et-contrats-automobiles?select=Sinistre.xlsx) |
 
 ---
 
@@ -92,15 +87,6 @@ install.packages(c(
   "sf", "leaflet", "RColorBrewer", "knitr", "rmarkdown"
 ))
 ```
-
-### Cloner le dépôt
-
-```bash
-git clone https://github.com/TON_USERNAME/ENSAssuRances.git
-cd ENSAssuRances
-```
-
----
 
 ## 🚀 Utilisation
 
@@ -153,8 +139,7 @@ Ou dans RStudio : ouvrir le `.Rmd` et cliquer sur **Knit → Knit to HTML**.
 
 | Livrable | Lien |
 |---|---|
-| 📓 Rapport HTML (RPubs) | [Voir le rapport 🔗](https://rpubs.com/TON_USERNAME/ENSAssuRances) |
-| 📊 Dataset (Kaggle) | [Voir le dataset 🔗](https://www.kaggle.com/datasets/TON_USERNAME/ensassurances) |
+| 📊 Dataset (Kaggle) | [Voir le dataset 🔗](https://www.kaggle.com/datasets/patxibidart/ensassurances-sinistres-et-contrats-automobiles?select=Sinistre.xlsx) |
 | 💻 Code source (GitHub) | Ce dépôt |
 
 ---
@@ -164,11 +149,9 @@ Ou dans RStudio : ouvrir le `.Rmd` et cliquer sur **Knit → Knit to HTML**.
 **Patxi Bidart**
 Projet réalisé dans le cadre du cours d'ingénierie des données
 Encadrant : **Prof. Dr. Solym Manou-Abi**
-Février – Avril 2026
 
 ---
 
 ## 📄 Licence
 
 - **Code** : [MIT License](LICENSE)
-- **Données** : [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
