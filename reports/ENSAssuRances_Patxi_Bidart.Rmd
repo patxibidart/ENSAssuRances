@@ -1,0 +1,810 @@
+---
+title: "Analyse des sinistres automobiles chez ENSAssuRances"
+author: "Patxi Bidart"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    number_sections: true
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.width = 8,
+  fig.height = 5
+)
+```
+
+---
+
+# Contexte général
+
+Ce projet porte sur la base de données **Sinistre** et **Contrat** contenant des informations sur des contrats d'assurance automobile et les sinistres associés, pour la compagnie fictive **ENSAssuRances**. Cette base contient *320 000* lignes et permet d'étudier la fréquence, la répartition et les facteurs de risque liés aux sinistres automobiles.
+
+Mené au sein de la Direction Technique Automobile d'ENSAssuRances, ce projet est placé sous l'égide de son directeur, **Prof. Dr. Solym Manou-Abi**. Il vise à :
+
+- Structurer, nettoyer et transformer la base de données sinistres et contrats
+- Produire des analyses exploratoires et statistiques détaillées
+- Visualiser les données afin de faciliter la prise de décision en assurance
+- Identifier les caractéristiques des contrats et véhicules à risque
+
+---
+
+# Importation des packages et des données
+
+## Chargement des librairies
+
+```{r packages}
+library(readxl)       # Lecture fichiers Excel
+library(dplyr)        # Manipulation données tabulaires
+library(tidyr)        # Reshape / pivot
+library(ggplot2)      # Visualisations
+library(lubridate)    # Gestion des dates
+library(scales)       # Formatage des axes
+library(stringr)      # Manipulation de chaînes
+library(naniar)       # Visualisation valeurs manquantes
+library(sf)           # Données spatiales
+library(leaflet)      # Carte interactive
+library(RColorBrewer) # Palettes de couleurs
+library(knitr)        # Tableaux formatés
+```
+
+## Importation des données
+
+```{r import}
+contrat  <- read_excel("Contrat.xlsx")
+sinistre <- read_excel("Sinistre.xlsx")
+
+cat("Contrat  :", nrow(contrat),  "lignes x", ncol(contrat),  "colonnes\n")
+cat("Sinistre :", nrow(sinistre), "lignes x", ncol(sinistre), "colonnes\n")
+```
+
+## Aperçu des données
+
+```{r apercu}
+head(contrat)
+```
+
+```{r apercu_sin}
+head(sinistre)
+```
+
+## Structure et valeurs manquantes
+
+```{r structure}
+str(contrat)
+```
+
+```{r na_init}
+cat("Valeurs manquantes - Contrat :\n")
+print(colSums(is.na(contrat)))
+
+cat("\nValeurs manquantes - Sinistre :\n")
+print(colSums(is.na(sinistre)))
+```
+
+---
+
+# Volet 1 – Ingénierie des données
+
+## 4.1 Manipulation de données tabulaires
+
+### Nettoyage et détection des doublons
+
+```{r doublons}
+cat("Doublons CONTRAT :", sum(duplicated(contrat)), "\n")
+cat("Doublons SINISTRE :", sum(duplicated(sinistre)), "\n")
+
+contrat  <- distinct(contrat)
+sinistre <- distinct(sinistre)
+```
+
+### Conversion des types numériques
+
+```{r conversion_types}
+contrat <- contrat %>%
+  mutate(
+    drv1Age   = as.numeric(drv1Age),
+    vhAge     = as.numeric(vhAge),
+    vhDIN     = as.numeric(vhDIN),
+    vhValue   = as.numeric(vhValue),
+    claimsAnt = as.numeric(claimsAnt),
+    vhGroup   = as.numeric(vhGroup),
+    idxYear   = as.numeric(idxYear)
+  )
+```
+
+### Détection des incohérences
+
+```{r incoherences}
+# Âge conducteur < 18 ou > 100
+inco_age <- contrat %>% filter(drv1Age < 18 | drv1Age > 100)
+cat("Ages incohérents :", nrow(inco_age), "\n")
+
+# Âge véhicule négatif
+inco_vh <- contrat %>% filter(vhAge < 0)
+cat("Age véhicule incohérent :", nrow(inco_vh), "\n")
+```
+
+### Filtrage (filter)
+
+```{r filtrage}
+# Contrats valides uniquement (conducteurs >= 18 ans)
+contrat_clean <- contrat %>% filter(drv1Age >= 18)
+
+# Véhicules électriques
+veh_elec <- contrat %>% filter(vhEnergy == "Electric")
+```
+
+### Groupby + summarise
+
+```{r groupby}
+# Nombre de contrats par année
+contrats_par_an <- contrat %>%
+  group_by(idxYear) %>%
+  summarise(nb_contrats = n(), .groups = "drop")
+
+# Moyenne d'âge du conducteur par année
+age_moyen <- contrat %>%
+  group_by(idxYear) %>%
+  summarise(drv1Age = mean(drv1Age, na.rm = TRUE), .groups = "drop")
+
+head(contrats_par_an)
+head(age_moyen)
+```
+
+### Tri (order by)
+
+```{r tri}
+contrats_par_an <- contrats_par_an %>% arrange(desc(nb_contrats))
+contrats_par_an
+```
+
+### Création de variables (mutate)
+
+```{r mutate}
+contrat <- contrat %>%
+  mutate(
+    drv1Age          = as.numeric(drv1Age),
+    classe_age       = cut(
+      drv1Age,
+      breaks         = c(18, 25, 40, 60, 100),
+      labels         = c("18-25", "25-40", "40-60", "60+"),
+      include.lowest = TRUE
+    ),
+    jeune_conducteur = as.integer(drv1Age < 25)
+  )
+```
+
+### Sous-ensembles
+
+```{r sous_ensembles}
+jeunes    <- contrat %>% filter(jeune_conducteur == 1)
+puissants <- contrat %>% filter(vhDIN > 150)
+
+cat("Nombre de jeunes conducteurs :", nrow(jeunes), "\n")
+cat("Nombre de véhicules puissants (> 150 DIN) :", nrow(puissants), "\n")
+```
+
+---
+
+## 4.2 Recodage et transformation
+
+### Recodage des variables catégorielles
+
+```{r recodage}
+# Sexe : H -> Homme, F -> Femme
+contrat <- contrat %>%
+  mutate(drv1Sex = recode(drv1Sex, "H" = "Homme", "F" = "Femme"))
+
+# Énergie du véhicule
+contrat <- contrat %>%
+  mutate(vhEnergy = recode(vhEnergy,
+    "G" = "Essence",
+    "D" = "Diesel",
+    "E" = "Electrique"
+  ))
+```
+
+### Normalisation de l'âge
+
+```{r normalisation}
+contrat <- contrat %>%
+  mutate(drv1Age_norm = (drv1Age - mean(drv1Age, na.rm = TRUE)) /
+                         sd(drv1Age, na.rm = TRUE))
+```
+
+### Agrégation
+
+```{r agregation}
+# Extraction de l'année depuis la date de déclaration
+sinistre <- sinistre %>%
+  mutate(
+    decl_sin = as.Date(decl_sin),
+    annee    = year(decl_sin)
+  )
+
+# Nombre de sinistres par année
+sinistres_par_an <- sinistre %>%
+  group_by(annee) %>%
+  summarise(nb_sinistres = n(), .groups = "drop")
+
+# Statistiques par type de véhicule
+vehicule_stats <- contrat %>%
+  group_by(vhSegment) %>%
+  summarise(
+    age_moyen  = mean(drv1Age, na.rm = TRUE),
+    valeur_moy = mean(vhValue, na.rm = TRUE),
+    .groups    = "drop"
+  )
+
+# Nombre de contrats par zone géographique
+zone_stats <- contrat %>%
+  group_by(ctINSEE) %>%
+  summarise(nb_contrats = n(), .groups = "drop")
+```
+
+### Distribution de l'âge du conducteur
+
+```{r histo_age}
+ggplot(contrat, aes(x = drv1Age)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 30) +
+  labs(title = "Distribution de l'âge du conducteur", x = "Âge", y = "Effectif") +
+  theme_minimal()
+```
+
+---
+
+## 4.3 Jointure de données
+
+Il n'y a pas de clé commune aux deux datasets. On regroupe donc les IDs sinistres référencés dans les contrats pour créer la liaison.
+
+```{r jointure_prep}
+cols_sin <- c(
+  "id1_AssBase", "id2_AssBase", "id3_AssBase",
+  "id1_Ass0km",  "id2_Ass0km",  "id3_Ass0km",
+  "id1_AssVHR",  "id2_AssVHR",  "id3_AssVHR"
+)
+
+contrat_sin <- contrat %>% select(idxCt, all_of(cols_sin))
+
+# Passage en format long
+contrat_sin_long <- contrat_sin %>%
+  pivot_longer(
+    cols      = all_of(cols_sin),
+    names_to  = "variable",
+    values_to = "idx_sin"
+  ) %>%
+  filter(!is.na(idx_sin))
+```
+
+### LEFT JOIN
+
+Conserve tous les liens contrat-sinistre, même si le sinistre n'est pas retrouvé dans la table sinistre.
+
+```{r left_join}
+df_left <- contrat_sin_long %>% left_join(sinistre, by = "idx_sin")
+
+cat("LEFT JOIN\n")
+cat("Nb lignes :", nrow(df_left), "\n")
+cat("NA sinistre :", sum(is.na(df_left$gar_sin)), "\n")
+head(df_left)
+```
+
+### RIGHT JOIN
+
+Conserve tous les sinistres, même sans contrat associé.
+
+```{r right_join}
+df_right <- contrat_sin_long %>% right_join(sinistre, by = "idx_sin")
+
+cat("RIGHT JOIN\n")
+cat("Nb lignes :", nrow(df_right), "\n")
+cat("NA sinistre :", sum(is.na(df_right$gar_sin)), "\n")
+head(df_right)
+```
+
+### INNER JOIN
+
+Ne conserve que les correspondances exactes contrat ↔ sinistre.
+
+```{r inner_join}
+df_inner <- contrat_sin_long %>% inner_join(sinistre, by = "idx_sin")
+
+cat("INNER JOIN\n")
+cat("Nb lignes :", nrow(df_inner), "\n")
+cat("NA sinistre :", sum(is.na(df_inner$gar_sin)), "\n")
+head(df_inner)
+```
+
+### Comparaison des jointures
+
+```{r comparaison_jointures}
+taux_perte <- mean(is.na(df_left$gar_sin)) * 100
+
+cat("LEFT JOIN garde tous les liens contrat-sinistre\n")
+cat("INNER JOIN supprime les sinistres non retrouvés\n")
+cat("Différence de lignes :", nrow(df_left) - nrow(df_inner), "\n")
+cat("Taux de sinistres non retrouvés :", round(taux_perte, 2), "%\n")
+```
+
+> La jointure **LEFT** permet de conserver tous les sinistres référencés dans les contrats, même si certains ne sont pas retrouvés dans la table sinistre. La jointure **INNER** est plus restrictive. Une perte d'information est observée, ce qui peut être dû à des erreurs de saisie ou à des données manquantes.
+
+### Distribution du nombre de sinistres par contrat
+
+```{r distrib_sinistres}
+nb_sinistres <- df_inner %>%
+  group_by(idxCt) %>%
+  summarise(n_sinistres = n(), .groups = "drop")
+
+summary(nb_sinistres$n_sinistres)
+
+ggplot(nb_sinistres, aes(x = n_sinistres)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 20) +
+  labs(
+    title = "Distribution du nombre de sinistres par contrat",
+    x     = "Nombre de sinistres",
+    y     = "Fréquence"
+  ) +
+  theme_minimal()
+```
+
+---
+
+## 4.4 Contrôle et flux de données
+
+### Structures conditionnelles (if/else)
+
+```{r if_else}
+# Fonction de catégorisation d'âge
+categorie_age <- function(age) {
+  if (age < 25) {
+    return("Jeune")
+  } else if (age < 60) {
+    return("Adulte")
+  } else {
+    return("Senior")
+  }
+}
+
+contrat <- contrat %>%
+  mutate(categorie_age = sapply(drv1Age, categorie_age))
+```
+
+### Boucle FOR
+
+```{r boucle_for}
+segments <- unique(contrat$vhSegment)
+
+for (seg in segments) {
+  moyenne <- mean(contrat$drv1Age[contrat$vhSegment == seg], na.rm = TRUE)
+  cat(sprintf("Segment %s -> âge moyen : %.2f\n", seg, moyenne))
+}
+```
+
+### Score de risque (apply / case_when)
+
+```{r score_risque}
+contrat <- contrat %>%
+  mutate(
+    score_risque = case_when(
+      drv1Age < 25 & vhDIN > 150 & claimsAnt > 0 ~ 7,
+      drv1Age < 25 & vhDIN > 150                  ~ 4,
+      drv1Age < 25 & claimsAnt > 0                ~ 5,
+      vhDIN > 150  & claimsAnt > 0                ~ 5,
+      drv1Age < 25                                 ~ 2,
+      vhDIN > 150                                  ~ 2,
+      claimsAnt > 0                                ~ 3,
+      TRUE                                         ~ 0
+    )
+  )
+
+# TOP 10 scores
+top10 <- contrat %>%
+  arrange(desc(score_risque)) %>%
+  select(idxCt, drv1Age, vhDIN, claimsAnt, score_risque) %>%
+  head(10)
+
+top10
+```
+
+```{r histo_score}
+ggplot(contrat, aes(x = score_risque)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(title = "Distribution du score de risque", x = "Score", y = "Fréquence") +
+  theme_minimal()
+```
+
+### Extraction de cas spécifiques
+
+```{r cas_specifiques}
+veh_elec        <- contrat %>% filter(vhEnergy == "Electrique")
+jeunes          <- contrat %>% filter(drv1Age < 25)
+petits_rouleurs <- contrat %>% filter(ctKM == "Petit")
+
+cat("Véhicules électriques :", nrow(veh_elec), "\n")
+cat("Jeunes conducteurs :", nrow(jeunes), "\n")
+cat("Petits rouleurs :", nrow(petits_rouleurs), "\n")
+```
+
+---
+
+## 4.5 Transformation et exploration
+
+### Distributions
+
+```{r distrib_age}
+ggplot(contrat, aes(x = drv1Age)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 30) +
+  labs(title = "Distribution de l'âge", x = "Âge", y = "Effectif") +
+  theme_minimal()
+```
+
+```{r distrib_sinistres_ant}
+ggplot(contrat, aes(x = claimsAnt)) +
+  geom_histogram(fill = "coral", color = "white", bins = 20) +
+  labs(title = "Distribution des sinistres antérieurs",
+       x = "Nombre de sinistres", y = "Effectif") +
+  theme_minimal()
+```
+
+```{r distrib_segment}
+ggplot(contrat, aes(x = vhSegment)) +
+  geom_bar(fill = "orange") +
+  labs(title = "Répartition des types de véhicules",
+       x = "Type de véhicule", y = "Nombre") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Gestion des dates
+
+```{r dates}
+contrat <- contrat %>%
+  mutate(
+    sitStartDate  = as.Date(sitStartDate),
+    annee_contrat = year(sitStartDate)
+  )
+
+sinistre <- sinistre %>%
+  mutate(annee_sinistre = year(decl_sin))
+```
+
+### Proportions par sexe
+
+```{r prop_sexe}
+prop_sexe <- contrat %>%
+  count(drv1Sex) %>%
+  mutate(pourcentage = n / sum(n) * 100)
+
+prop_sexe
+
+ggplot(prop_sexe, aes(x = drv1Sex, y = pourcentage)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Répartition du sexe (%)", x = "Sexe", y = "Pourcentage") +
+  theme_minimal()
+```
+
+---
+
+## 4.6 Valeurs manquantes et data processing
+
+### Identification des valeurs manquantes
+
+```{r na_detection}
+na_contrat  <- colSums(is.na(contrat))  %>% sort(decreasing = TRUE)
+na_sinistre <- colSums(is.na(sinistre)) %>% sort(decreasing = TRUE)
+
+print(na_contrat)
+print(na_sinistre)
+```
+
+### Stratégies d'imputation
+
+```{r imputation}
+# Numérique -> médiane
+contrat <- contrat %>%
+  mutate(drv1Age = if_else(is.na(drv1Age), median(drv1Age, na.rm = TRUE), drv1Age))
+
+# Catégoriel -> "Inconnu"
+contrat <- contrat %>%
+  mutate(vhEnergy = if_else(is.na(vhEnergy), "Inconnu", vhEnergy))
+```
+
+### Visualisation des valeurs manquantes
+
+```{r visu_na}
+na_pct <- contrat %>%
+  summarise(across(everything(), ~ mean(is.na(.)) * 100)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "pct_na") %>%
+  filter(pct_na > 0) %>%
+  arrange(desc(pct_na))
+
+ggplot(na_pct, aes(x = reorder(variable, pct_na), y = pct_na)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Pourcentage de valeurs manquantes par variable",
+    x     = "Variable",
+    y     = "% de NA"
+  ) +
+  theme_minimal()
+```
+
+### Fonction de nettoyage reproductible
+
+```{r clean_function}
+clean_data <- function(df) {
+  df <- distinct(df)
+  df <- df %>%
+    mutate(
+      drv1Age  = if_else(is.na(drv1Age), median(drv1Age, na.rm = TRUE), drv1Age),
+      vhEnergy = if_else(is.na(vhEnergy), "Inconnu", vhEnergy)
+    )
+  return(df)
+}
+
+contrat <- clean_data(contrat)
+```
+
+---
+
+## 4.7 Données spécifiques
+
+### Zones géographiques à risque
+
+```{r zones_risque}
+zone_risque <- contrat %>%
+  group_by(ctINSEE) %>%
+  summarise(risque_moyen = mean(claimsAnt, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(risque_moyen))
+
+head(zone_risque, 10)
+```
+
+### Risque par type et groupe de véhicule, et par sexe
+
+```{r risque_categories}
+risque_segment <- contrat %>%
+  group_by(vhSegment) %>%
+  summarise(risque_moyen = mean(claimsAnt, na.rm = TRUE), .groups = "drop")
+
+risque_groupe <- contrat %>%
+  group_by(vhGroup) %>%
+  summarise(risque_moyen = mean(claimsAnt, na.rm = TRUE), .groups = "drop")
+
+risque_sexe <- contrat %>%
+  group_by(drv1Sex) %>%
+  summarise(risque_moyen = mean(claimsAnt, na.rm = TRUE), .groups = "drop")
+
+risque_segment
+head(risque_groupe)
+risque_sexe
+```
+
+### Options contractuelles
+
+```{r options_contractuelles}
+risque_km <- contrat %>%
+  group_by(ctKM) %>%
+  summarise(risque_moyen = mean(claimsAnt, na.rm = TRUE), .groups = "drop")
+
+risque_assurance <- contrat %>%
+  group_by(ctAssBase) %>%
+  summarise(risque_moyen = mean(claimsAnt, na.rm = TRUE), .groups = "drop")
+
+risque_km
+risque_assurance
+```
+
+> Les conducteurs déclarés comme **petits rouleurs** présentent une fréquence de sinistres légèrement plus faible (0.389 contre 0.397), ce qui est cohérent avec l'idée qu'un kilométrage réduit diminue l'exposition au risque.
+
+---
+
+# Volet 2 – Analyse et visualisation
+
+## Sinistres par année
+
+```{r sin_par_an}
+sin_par_an <- sinistre %>%
+  group_by(annee) %>%
+  summarise(nb_sinistres = n(), .groups = "drop")
+
+ggplot(sin_par_an, aes(x = annee, y = nb_sinistres)) +
+  geom_col(fill = "steelblue") +
+  scale_x_continuous(breaks = unique(sin_par_an$annee)) +
+  labs(title = "Nombre de sinistres par année", x = "Année", y = "Nombre de sinistres") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Contrats par année
+
+```{r contrats_par_an}
+ggplot(contrat, aes(x = annee_contrat)) +
+  geom_bar(fill = "darkgreen") +
+  scale_x_continuous(breaks = sort(unique(contrat$annee_contrat))) +
+  labs(title = "Distribution des contrats par année", x = "Année", y = "Nombre de contrats") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Répartition des types de véhicules
+
+```{r types_vehicules}
+ggplot(contrat, aes(x = vhSegment)) +
+  geom_bar(fill = "orange") +
+  labs(title = "Répartition des types de véhicules", x = "Type de véhicule", y = "Nombre") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Répartition selon l'alimentation
+
+```{r alimentation}
+ggplot(contrat, aes(x = vhEnergy)) +
+  geom_bar(fill = "purple") +
+  labs(title = "Répartition des énergies", x = "Énergie", y = "Nombre") +
+  theme_minimal()
+```
+
+## Distribution par groupe de véhicule
+
+```{r groupe_vehicule}
+ggplot(contrat, aes(x = vhGroup)) +
+  geom_histogram(bins = 20, fill = "skyblue", color = "white") +
+  labs(title = "Distribution des groupes de véhicules", x = "Groupe", y = "Fréquence") +
+  theme_minimal()
+```
+
+## Option petit rouleur
+
+```{r petit_rouleur}
+ggplot(contrat, aes(x = ctKM)) +
+  geom_bar(fill = "red") +
+  labs(title = "Contrats selon option kilométrage",
+       x = "Type (petit rouleur ou non)", y = "Nombre") +
+  theme_minimal()
+```
+
+## Sinistres en fonction de l'âge
+
+```{r sinistres_age}
+ggplot(contrat, aes(x = drv1Age, y = claimsAnt)) +
+  geom_point(alpha = 0.3) +
+  labs(title = "Sinistres en fonction de l'âge", x = "Âge", y = "Nombre de sinistres") +
+  theme_minimal()
+```
+
+## Distribution des sinistres antérieurs
+
+```{r distrib_claims}
+ggplot(contrat, aes(x = claimsAnt)) +
+  geom_histogram(bins = 15, fill = "darkblue", color = "white") +
+  labs(title = "Distribution des sinistres antérieurs",
+       x = "Nombre de sinistres", y = "Fréquence") +
+  theme_minimal()
+```
+
+## Risque moyen par segment
+
+```{r risque_segment_plot}
+risque_segment <- contrat %>%
+  group_by(vhSegment) %>%
+  summarise(claimsAnt = mean(claimsAnt, na.rm = TRUE), .groups = "drop")
+
+ggplot(risque_segment, aes(x = vhSegment, y = claimsAnt)) +
+  geom_col(fill = "darkred") +
+  labs(title = "Risque moyen par type de véhicule",
+       x = "Segment", y = "Nombre moyen de sinistres") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Top 10 véhicules les plus risqués
+
+```{r top10_risque}
+top_risque <- risque_segment %>%
+  arrange(desc(claimsAnt)) %>%
+  head(10)
+
+ggplot(top_risque, aes(x = reorder(vhSegment, claimsAnt), y = claimsAnt)) +
+  geom_col(fill = "black") +
+  coord_flip() +
+  labs(title = "Top 10 des véhicules les plus risqués", x = "Segment", y = "Risque") +
+  theme_minimal()
+```
+
+## Sinistres par sexe
+
+```{r sinistres_sexe}
+sin_sexe <- contrat %>%
+  group_by(drv1Sex) %>%
+  summarise(claimsAnt = sum(claimsAnt, na.rm = TRUE), .groups = "drop") %>%
+  mutate(pourcentage = claimsAnt / sum(claimsAnt) * 100)
+
+sin_sexe
+
+ggplot(sin_sexe, aes(x = drv1Sex, y = claimsAnt)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = scales::comma(claimsAnt)), vjust = -0.5) +
+  labs(title = "Nombre total de sinistres selon le sexe",
+       x = "Sexe", y = "Nombre de sinistres") +
+  theme_minimal()
+
+ggplot(sin_sexe, aes(x = drv1Sex, y = pourcentage)) +
+  geom_col(fill = "darkgreen") +
+  geom_text(aes(label = sprintf("%.1f%%", pourcentage)), vjust = -0.5) +
+  labs(title = "Pourcentage de sinistres selon le sexe",
+       x = "Sexe", y = "Pourcentage (%)") +
+  theme_minimal()
+```
+
+## Carte des zones géographiques à risque
+
+```{r carte, out.width="100%"}
+# Extraction du code département
+contrat <- contrat %>%
+  mutate(
+    departement = str_sub(as.character(ctINSEE), 1, 2),
+    departement = if_else(departement == "20", "2A", departement)
+  )
+
+# Risque moyen par département
+risque_dep <- contrat %>%
+  group_by(departement) %>%
+  summarise(risque = mean(claimsAnt, na.rm = TRUE), .groups = "drop") %>%
+  rename(code = departement)
+
+# Chargement du GeoJSON des départements français
+url_geojson <- "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements.geojson"
+departements_sf <- sf::st_read(url_geojson, quiet = TRUE)
+
+# Jointure avec les données de risque
+carte_data <- departements_sf %>% left_join(risque_dep, by = "code")
+
+# Palette de couleurs
+pal <- colorNumeric("Reds", domain = carte_data$risque, na.color = "grey")
+
+# Carte interactive
+leaflet(carte_data) %>%
+  addTiles() %>%
+  addPolygons(
+    fillColor   = ~pal(risque),
+    fillOpacity = 0.8,
+    color       = "white",
+    weight      = 1,
+    label       = ~paste0(nom, " : ", round(risque, 3))
+  ) %>%
+  addLegend(
+    pal      = pal,
+    values   = ~risque,
+    title    = "Risque moyen",
+    position = "bottomright"
+  ) %>%
+  setView(lng = 2.5, lat = 46.5, zoom = 5)
+```
+
+---
+
+# Synthèse et recommandations
+
+À l'issue de cette analyse, les principaux enseignements pour la gestion des risques chez **ENSAssuRances** sont :
+
+- Les **jeunes conducteurs** (< 25 ans) et les **véhicules puissants** (> 150 DIN) concentrent les scores de risque les plus élevés
+- Une **disparité géographique** est observée entre les départements, certaines zones présentant une sinistralité nettement supérieure à la moyenne
+- Les **petits rouleurs** déclarent légèrement moins de sinistres, confirmant l'intérêt de l'option kilométrique comme levier de tarification
+- La variable `ctAssBase` ne présente qu'une seule modalité exploitable et ne permet pas de discrimination du risque en l'état
+
+Ces résultats constituent une base solide pour affiner la **segmentation tarifaire** et adapter les conditions contractuelles aux différents profils identifiés.
+
+---
