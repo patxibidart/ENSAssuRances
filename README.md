@@ -46,11 +46,19 @@ ENSAssuRances/
 │   ├── Contrat.xlsx                # 301 437 lignes × 40 colonnes
 │   └── Sinistre.xlsx               # 72 130 lignes × 8 colonnes
 │
+├── 📂 docs/
+|   ├── Dico-Contrat-Sinistre-2.pdf
+|   └── Dico-données-1.pdf
+|
 ├── 📂 scripts/                     # Scripts R
 │   └── ENSAssuRances_Patxi_Bidart.R
 │
-├── 📂 report/                      # Rapport RMarkdown
-│   └── ENSAssuRances_Patxi_Bidart.Rmd                     
+├── 📂 py/                     # Scripts R
+│   └── Devoir_ENSAssuRances_Patxi_Bidart.py
+│
+├── 📂 reports/                      # Rapport RMarkdown
+|   ├── ENSAssuRances_Patxi_Bidart.Rmd 
+│   └── ENSAssuRances_Patxi_Bidart.html                     
 │
 ├── .gitignore
 └── README.md
